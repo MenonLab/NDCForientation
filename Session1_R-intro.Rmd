@@ -1,0 +1,389 @@
+---
+title: "R intro"
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+#Version and directory
+```{r}
+#display the R version (plus the version of other attached packages)
+sessionInfo() 
+```
+
+```{r}
+# print working directory
+getwd()
+```
+
+
+```{r}
+# this line itself will not print as it is commented, but the next line will print
+print("this will be printed")
+```
+
+
+#Arithmetic operations
+```{r}
+#Arithmetic: +,-,/, * are called operators
+2 + 2
+2 - 2
+15 / 2
+5 * 4
+2 + 2 *3 
+(2 + 2) * 3
+```
+
+#Variables
+##A variable is any text (letter/word/alpha-numeric) which stores some value
+##We use the assignment operator '<-' or '=' to pass a value to the variable
+```{r}
+# Variables
+x <- 4
+some_number <- 20
+```
+
+
+##Add two variables
+```{r}
+x+some_number
+```
+
+##Change the value of a variable
+```{r}
+x=100
+x
+x=x+2
+x
+```
+
+
+
+#Vectors
+##A vector is a collection of data elements
+```{r}
+ 
+some_vector1 <- c(1,2,3,4,5,6) # c is a 'function' that combines its arguments into a vector
+some_vector1
+some_vector2 <- 1:6 # a shortcut
+some_vector2
+
+series1 <- seq(from = 2, to = 20, by = 4) #series1 is a vector created by function seq
+series1
+
+```
+
+```{r}
+##how to get help on a function in R
+?seq
+```
+
+```{r}
+#we can perform operations on vectors such as addition, multiplication etc
+x <- 1:5
+x
+y= x*2
+y
+```
+
+```{r}
+# add the two vectors
+joined_vectors <- some_vector1 + some_vector2 # the vectors will be added element-wise
+joined_vectors
+```
+
+## indexing and manipulating elements in a vector
+## - Square brackets [ ] - used for indexing (position)
+## - Parentheses () - used in functions to provide arguements
+```{r}
+
+x=seq(1,12,2)
+x
+
+
+```
+```{r}
+x[3] # 3 here is the index value, i.e 3rd element in x
+x[c(3,4)]
+## removing an element
+x[-3] ## is x changed?
+y= x[-4]
+y
+```
+
+## searching for items in vectors
+```{r}
+# the which command will return the index (indices) of the value
+x=c(1,7,6,5,4,9)
+which(x == 7)
+which(x > 5)
+which(x == 3)
+```
+## minimum, maximum, mean, median
+```{r}
+max(x)
+min(x)
+range(x)
+```
+```{r}
+which.max(x)
+which.min(x)
+```
+```{r}
+mean(x)
+median(x)
+```
+
+## character vectors: Instead of numbers we use strings
+```{r}
+char_vec1 <- c("Maurice", "Jodi-Ann", "Essiet", "Brhan", "Jheannelle", "Layla")
+char_vec1
+char_vec1[3]
+which(char_vec1=="Layla")
+```
+
+
+#Functions
+##Functions are an operation or task performed on input 'arguments', which can be specified as variables
+```{r}
+## seq function is a build-in creating a series of numbers on the basis of specified parameters. 
+x <- seq(from = 2, to = 20, by = 4)
+x
+length(x) # length is a function
+```
+
+## Getting help
+```{r}
+?seq
+```
+
+
+
+#Data frames
+##In any form of data analysis, it is important to understand the format of dataset(s). 
+##Data frames are form of data structures in tabular format. They are the most widely used format for data analysis in R. 
+##Data frames consist of:
+##- rows : Observations
+##- columns : Vectors of particular data types (such as character, integer,logical).
+##Different columns can be of different datatype.
+##Elements of same column must be same type
+
+##Creating a data frame
+```{r}
+firstName <- c("Jheannelle","Jodi-Ann","Maurice","Brhan","Layla","Essiet") ## firstName is a Vector
+lastName <- c("Johnson", "Richards", "Wade", "Gebremedhin", "Sana", "Ette")
+Gender <- c("female", "female", "male", "male", "female","female")
+id_no <- c(20,29,32,15,26,19)
+Fav_icecream <- c("Vanilla","Strawberry","Pistachio","Chocolate","Vanilla","Chocolate")
+
+
+ndcf_fellows <-  data.frame(firstName, lastName, FullName=paste(firstName, lastName), Gender, id_no, Fav_icecream) # data.frame is a function to create a new data frame, ndcf_fellows is dataframe
+ndcf_fellows
+```
+
+##Displaying features or data types within the data frame 
+```{r}
+#summary(ndcf_fellows)
+str(ndcf_fellows)
+```
+```{r}
+class(Fav_icecream)
+```
+
+###Accessing columns in a data frame with $ notation
+```{r}
+ndcf_fellows
+ndcf_fellows$FullName
+```
+
+##Tabulating entries in the data frame
+```{r}
+#ndcf_fellows$firstName
+table(ndcf_fellows$Gender)
+
+table(ndcf_fellows$Gender, ndcf_fellows$Fav_icecream)
+```
+
+##Writing the table to a csv file
+```{r}
+#save this table
+write.csv(ndcf_fellows,"ndcf_fellows.csv")
+```
+
+##Reading a csv file into a data frame
+```{r}
+# open and read a csv file
+ndcf_fellows2 <- read.csv("ndcf_fellows.csv", row.names = 1)
+ndcf_fellows2
+```
+
+##Exploring data frames
+```{r}
+
+#Size
+dim(ndcf_fellows) #returns number of rows and the number of columns
+
+nrow(ndcf_fellows) # number of rows
+
+ncol(ndcf_fellows) # number of columns
+
+```
+
+##Viewing parts of the data frame
+```{r}
+#Content
+head(ndcf_fellows)
+tail(ndcf_fellows)
+colnames(ndcf_fellows)
+rownames(ndcf_fellows)
+#rownames(ndcf_fellows) <- ndcf_fellows$firstName
+#rownames(ndcf_fellows)
+
+```
+
+##Summarize features in a data frame
+```{r}
+summary(ndcf_fellows)
+```
+
+
+##Indexing and subsetting data frames
+##use [] bracketcs, [row position,column position] 
+```{r}
+ndcf_fellows
+```
+
+```{r}
+ndcf_fellows[2,]#extract entire row, which is a dataframe with single observation
+```
+```{r}
+ndcf_fellows[2,3] # extract a particular element at row2 column3
+```
+
+##Column notation
+```{r}
+#Extract entire column, which is a vector
+#ndcf_fellows$firstName
+#ndcf_fellows[["firstName"]]
+#ndcf_fellows[,"firstName"]
+#ndcf_fellows[,"Gender"]
+```
+
+```{r}
+#Extract particular cell
+ndcf_fellows[4,6]
+```
+```{r}
+#extract cell using column name
+ndcf_fellows[4,"firstName"]
+```
+
+##Subset rows and columns
+```{r}
+# subsetting
+#extract n number of rows
+ndcf_fellows[c(1,2,4,6),]
+```
+
+```{r}
+##extract some rows and columns
+new_set<- ndcf_fellows[1:5,c("firstName","id_no", "Gender")]
+new_set
+```
+
+```{r}
+#extract rows based on some condition
+ndcf_fellows[which(ndcf_fellows$Gender=="female"),]
+```
+
+
+```{r}
+##make a new table with only female members
+ndcf_fellows[which(ndcf_fellows$Gender=="female"),]
+female_members <- ndcf_fellows[which(ndcf_fellows$Gender=="female"),]
+female_members
+
+```
+
+##Exclusion notation
+```{r}
+#show everything except particular column
+ndcf_fellows[,-1]
+```
+
+```{r}
+#show everything except particular rows
+ndcf_fellows[-c(1,3),]
+```
+
+##Text searching with grep
+```{r}
+###using Grep
+## grep index values i.e.tell me the name of row numbers where the first name starts with 'J'
+grep("^J", ndcf_fellows$firstName) # ^ is a regular expression also called regex in coding
+
+```
+
+
+```{r}
+####subsetting with grep
+firstnameL <- ndcf_fellows[grep("^J",ndcf_fellows$firstName),]
+firstnameL
+
+```
+
+##change the values in data frame
+```{r}
+ndcf_fellows[4,5] <- "50"
+ndcf_fellows
+```
+
+```{r}
+# gsub function
+ndcf_fellows$Fav_icecream <- gsub("Vanilla","GreenTea",ndcf_fellows$Fav_icecream )
+ndcf_fellows
+```
+
+
+#Conditional statements and loops
+```{r}
+# open saved file
+ndcf_fellows2 <- read.csv("ndcf_fellows.csv", row.names = 1)
+ndcf_fellows2
+```
+
+##If statements
+##These statements allow certain actions to be performed only if a statement is true
+```{r}
+if (nrow(ndcf_fellows2) > 10) {
+  print("There are more than 10 Fellows")
+} else {
+  print("There are 10 or fewer Fellows")
+}
+```
+
+```{r}
+if (ndcf_fellows2$firstName[1]=="Layla") {
+  print("Layla is listed first in the table")
+} else {
+  print("Someone other than Layla is listed first in the table")
+}
+```
+
+##For loops
+##These loops will run a block of code a certain number of times
+```{r}
+for (loopvariable in 1:5) {
+  print(loopvariable)
+}
+```
+
+##More complex code in loop
+```{r}
+ndcf_fellows2$id_no=as.numeric(ndcf_fellows2$id_no)
+ndcf_fellows2
+for (var1 in 1:nrow(ndcf_fellows2)) {
+  ndcf_fellows2$id_no[var1]=2*ndcf_fellows2$id_no[var1]
+}
+ndcf_fellows2
+```
