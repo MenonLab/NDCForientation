@@ -1,0 +1,416 @@
+---
+title: "Differential Expression"
+author: "Tain Luquez and Fahad Paryani"
+date: '2022-04-28'
+output: html_document
+---
+
+```{r}
+packages_to_install=c("edgeR","hexbin","ggplot2","stats","MatrixGenerics")
+install.packages(setdiff(packages_to_install, rownames(installed.packages())))
+```
+
+```{r}
+BiocManager::install("vsn")
+BiocManager::install("EnhancedVolcano")
+```
+
+
+```{r}
+require(vsn)
+require(edgeR)
+require(hexbin)
+require(ggplot2)
+require(stats)
+require(MatrixGenerics)
+require(DESeq2)
+require(EnhancedVolcano)
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, comment = "")
+```
+
+# What is bulk RNAseq analysis?
+
+RNA-seq analysis describes the genomic technique which involves the collection of RNA from a tissue or a sample of interest and quantifying the amount of RNA. The entire process involves extracting RNA from a tissue which are then converted back into cDNA and sent into a sequencer. The computational aspect of bulk RNAseq analysis begins from the FASTQ files that are generated from the sequencer. Within these files are nucleotide sequences that are matched to a reference genome to get a count for each gene. There are a variety of quality control metrics and tools to mainstream this portion of the analysis. The focus of this notebook will begin with the count matrix (that was generated in alignment phase) and all the downstream analysis. 
+
+![](images/conesa2016.png)
+
+A little detail that is worth mentioning is the "bulk" aspect refers to the collection of all tissue. Now there are exciting technologies where we can sequence on a single cell resolution. There will be more time next week to dive into single cell analysis but for now lets get started with bulk RNAseq!
+
+
+![](images/bulk_rna.png)
+
+Today we are going to focus on pre-processing and differential expression, part of the core-analysis.
+
+# Preprocessing: from raw counts to usable stuff! 
+
+```{r}
+#Generating some synthetic data for demonstrations
+
+num_gene <- 10000
+num_sample <- 8
+
+data <- DESeq2::makeExampleDESeqDataSet(n=num_gene, m=num_sample, betaSD=2)@assays@data$counts
+
+```
+
+## Unormalized matrix
+
+Once you have a counts matrix the most natural thing to do is begin comparing the levels of gene expression...DO NOT DO THIS! There are several confounding variables and "carpentry" needed to be done on the counts matrix in order to extract true biological differences. Factors like the sequencing depth, batch, and even libraries (ie sequencing from different organs!) can alter the counts in ways that hinder the hypothesis. Throughout this workshop we will touch upon how to correct for various covariates as well as the reasoning behind them.
+
+![](images/covariates_rna.png)
+
+## Filtering 
+
+There are often many genes that have either very low expression to none at all. We want to get rid of these genes since these provide no information and can help cut down the size of our counts matrix. For this case, we want to filter out the genes that are not express in any of the samples. 
+
+```{r}
+data_filt <- data[rowSums(data)>0,]
+```
+
+If the above command is a bit confusing, break down the code!
+
+```{r}
+#Placing head() to print the first few total sums
+head(rowSums(data))
+
+#Creates a logical array for indexing 
+head(rowSums(data)>0)
+
+#Since the counts matrix is gene x sample, when placing the logical array it only selects the gene that satisfies the criteria 
+
+head(data[rowSums(data)>0,])
+```
+
+### Discussion
+
+> * What are some other ways to filter out genes? How would you do it?
+  ```
+  1. Can filter out if some genes are not expressed in some % of the samples
+  2. Statistically! Can calculate how much a gene varies across samples and if it has constant        
+  expression then can remove
+  3. Biologically, some genes can simply be removed since they are not of interest (like mithocondrial)
+  ```
+  
+  Let's take a look at how many genes have been filtered out
+  
+```{r}
+#Since its synthetic may not expect many to be filtered out but still important to check on real data
+dim(data)[1] - dim(data_filt)[1]
+```
+  
+  
+## Modeling the distribution of counts
+
+Before beginning the differential expression analysis, we need to select a model that describes the distribution of the RNA counts. When plotting the raw counts data it turns out the overall distribution is skewed to the right with a low number of counts that are associated with a large proportion of the genes. There are two distributions which can be selected to model the gene counts, the poisson distribution and negative binomial. Let's take a quick look at our distribution
+
+```{r}
+hist(data_filt)
+```
+
+Before we keep moving forward a natural question to ask is why are we modeling the gene counts in the first place? Don't we already have the counts data? While that is true we need some way to take into account the variation of each gene and come up with a statistical definition for what is considered "differentially" expressed. The basic premise is if an expressed gene falls outside or away from whatever model we use (remember this model describes what is normal), that gene is considered differentially expressed (not precisely this simple but the intuition makes sense).
+
+
+## Which distribution do we select?
+
+In order to answer this question we have to look at the mean-variance relationship in our data. We will plot the mean_counts on the x-axis and variance on the y-axis.
+
+```{r}
+mean_counts <- apply(data_filt, 1, mean)        #The second argument '1' of 'apply' function indicates the function being applied to rows. Use '2' if applied to columns 
+variance_counts <- apply(data_filt, 1, var)
+sd_counts <- apply(data_filt, 1, sd)
+
+df <- data.frame(mean_counts, variance_counts, sd_counts)
+
+ggplot(df) +
+        geom_point(aes(x=mean_counts, y=variance_counts)) + 
+        scale_y_log10(limits = c(1,1e9)) +
+        scale_x_log10(limits = c(1,1e9)) +
+        geom_abline(intercept = 0, slope = 1, color="red")
+```
+
+Looking at the mean-variance plot reveals that as the mean counts increases the variance seems to be increasing at a faster rate. This can be quite problematic for our differential expression analysis since genes that have higher counts will be identified as differentially expressed since they simply vary the most (not because it is biologically interesting). In addition, many clustering algorithms works best on data that have similar ranges of variance across a wider range of means. 
+
+Coming back on the question of which distribution to select for modeling counts, it turns out the negative binomial works the best. This is due to the key assumptions in the model. The poisson distribution assumes the mean = variance, which as we saw above is not the case. The negative binomial does not require such a condition and tends to work better when variance > mean. It is worth mentioning that with more replicates the mean-sd scatter points would converge closer to the red line. But in reality there are always some sort of variations in the data.
+
+## The power of transformation and normalization theory
+
+One of the steps in bulk-RNA seq analysis before doing differential expression analysis, is to normalize our counts matrix. One of the easiest ways to do this is simply divide each expression value by the total sum of all expression values. This allows all the counts value to be on a similar scale. Similar to filtering there a whole host of methods out there and techniques to account for different factors. For now here is a little table that describes a wide variety of techniques and when to use them. There is a link below at the end of the notebook that is a video which describes the various normalization procedures below, check them out! 
+
+![](images/normalization_table.png)
+
+However, normalizing the data does not get rid of the mean-variance issue we discussed above. This is where transforming our data plays a key role. One of the most common methods for transforming the data involves taking the log (and adding 1 to account for genes with zero counts and avoiding an inf value). We can show the power of transforming the data with some stimulated data. 
+
+```{r}
+lambda <- 10^seq(from = -1, to = 2, length = 1000)
+cts <- matrix(rpois(1000*100, lambda), ncol = 100)
+plot(rowMeans(cts), rowSds(cts))
+
+#An alternative way to plot the same result using the vsn package
+#Feel free to uncomment and plot the results
+# library(vsn)
+# meanSdPlot(cts, ranks = FALSE)
+```
+
+```{r}
+log.cts.one <- log2(cts + 1)
+plot(rowMeans(log.cts.one), rowSds(log.cts.one))
+
+#An alternative way to plot the same result using the vsn package
+#Feel free to uncomment and plot the results
+# meanSdPlot(log.cts.one, ranks = FALSE)
+```
+
+Note the difference in the tails of the data. The larger counts are no longer contributing the most variance. An issue that persists is the low mean counts providing unusually high variance. 
+
+
+# Differential expression 
+We are interested in answering the question: is there a difference between the number of transcripts of gene $i$ between two conditions? Visually this would look like this:
+
+```{r echo=TRUE}
+# Create dataframe
+data <- data.frame(
+    genei = c(sample(1:10, 5), sample(30:40, 5)),
+    cond = rep(c("ctrl", "cases"), each=5, times=1)
+    )
+data$cond <- factor(data$cond, levels = c("ctrl", "cases"))
+
+# Print dataframe
+data
+str(data)
+
+# Plot
+library(ggplot2)
+ggplot(data, aes(x=cond, y=genei)) +
+    geom_point() +
+    labs(x="Condition", y="Genei Counts")
+```
+
+The proper statistical test to perform in this case is a two-sample t-test:
+$$ \text{t-value} = \frac{(\bar{x}_{ctrl} - \bar{x}_{cases})}{SE(\bar{x}_{ctrl} - \bar{x}_{cases})}$$
+This formula compares the mean of the groups (numerator) accounting for their standard errors (denominator), which is a measure of precision. It is asking whether there is a difference in the group means given how spread out each group is. Let's compute the t-value and compare against a t-value distribution to compute our p-value:
+
+```{r}
+mod1 <- t.test(genei ~ cond, data=data, var.equal = T)
+mod1$stderr
+mod1
+```
+With a p-value of `r mod1$p.value` we reject the null hypothesis and conclude there are statistically significant differences between the mean read count in cases vs controls. So far so good.
+
+
+
+## Design matrix
+We just went through how differential expression analysis works for one gene but now we want to apply this to every single gene. A matrix formulation of this problem is described below.
+Or in simple notation 
+$$ \boldsymbol{Y} = \boldsymbol{X}\boldsymbol{\beta} + \boldsymbol{\epsilon} $$
+Again we are trying to explain the $Y_N$ which represent gene expression levels from $\beta$ which are our various predictors. The matrix $\boldsymbol{X}$ represents the design matrix and is critical for setting up an accurate differential expression analysis. The purpose of the design matrix is to encode what comparisons we are making. 
+
+We can easily construct design matrices using the `model.matrix` function from the `stats` package. The factor function assigns an order to the variables placed within it. In this case we have 2 variables, Control and Case. `factor` automatically orders alphabetically. `model.matrix` assumes the first variable is the reference so sometimes we would need to reorder to make sure the reference is our control samples.
+
+```{r}
+group <- factor( c("Control", "Control", "Case", "Case"), levels = c("Control","Case") )
+model.matrix(~ group)
+```
+
+The power of the design matrix comes into play when we want to include other variables that could alter the gene expression levels. To do so we simply add in that variable.
+
+```{r}
+group <- factor( c("Control", "Control", "Case", "Case"), levels = c("Control","Case") )
+sex <- c("m","f","m","f")
+model.matrix(~ group + sex)
+
+```
+
+You may have noticed the intercept column with all 1's and wondering what that means. To answer that question, we need to mention that there are two main regression models for covariates. One for quantitative measurements and another for categorical variables (but remember: models can be mixed too)!
+
+![](images/regression_covariates.png)
+
+Having that intercept column is important if your experiment has quantitative measurements. Here is a simple example. Consider the following data
+
+```{r}
+#With intercept column
+mouse_df <- data.frame("expression" = c(2.38,2.85,3.60,4.06,4.61,5.04),
+           "mouse" = c("M1","M2","M3","M4","M5","M6"),
+           "age" = c(1:6))
+
+model.matrix(~mouse_df$age)
+
+fit <- lm(expression~age,data = mouse_df)
+
+#create scatterplot
+plot(expression~age, data=mouse_df)
+
+#add fitted regression line to scatterplot
+abline(fit)
+```
+
+> * Run the same analysis but now without the intercept column.
+> * What happened to the regression line? Did it produce a more accurate or inaccurate result?
+
+
+
+```{r}
+#Without intercept column (can do so by simply putting "~0")
+
+model.matrix(~0+mouse_df$age)
+
+fit <- lm(expression~0+age,data = mouse_df)
+
+#create scatterplot
+plot(expression~age, data=mouse_df,
+     xlim = c(0,6),
+     ylim = c(0,6))
+
+#add fitted regression line to scatterplot
+abline(fit)
+
+```
+Not including the intercept column forces the regression model to go through the origin and in this case made the model worse. For factors only model, it does not make a difference whether you include the intercept or not.
+
+
+## DIFFERENTIAL EXPRESSION WITH edgeR
+EdgeR is a commonly used differential expression method. Instead of using a linear regression, EdgeR uses a Negative Binomial regression. This fix ensures that the counts distribution is taken into account when assessing the differences between groups. By using a model-based approach, EdgeR endows the user with flexibility to account for all kinds of experimental designs.
+
+The EdgeR pipeline can be broken up into three steps: 1) accounting for library sizes, 2) estimating gene dispersion, 3) modelling and hypothesis testing. Let's go through each of them. 
+
+The first step is to create the EdgeR object containing the counts and the groups:
+
+```{r message=FALSE}
+# Import data
+counts <- readRDS("data/counts.rds")
+counts[1:5,]
+pheno <- readRDS("data/pheno.rds")
+pheno
+
+# Create EdgeR object (it is a list)
+library(edgeR)
+y <- DGEList(counts = counts, group = pheno$group, samples = pheno)
+y$counts[1:2, 1:2]
+y$samples
+```
+
+### Relative vs absolute counts
+Notice the variation in the total number of reads detected per sample (` lib.size`). 
+What would happen if we compared the means of the first gene between cases and controls, say using a t-test? Consider the example:
+
+```{r}
+tmp <- data.frame(
+    gene1 = c(10, 11, 12, 20, 22, 24),
+    gene2 = c(20, 21, 22, 40, 42, 44),
+    cond = rep(c("ctrl", "cases"), each=3, times=1)
+    )
+tmp$cond <- factor(tmp$cond, levels = c("ctrl", "cases"))
+tmp
+plot(
+    tmp$cond,
+    tmp$gene1,
+    ylab="Absolute expression of genei",
+    xlab="Condition")
+```
+
+The results would be biased depending on the total number of reads per sample. In this case, the "cases" samples happened to be sequenced twice as deep as the controls. If we ran a comparison on the absolute counts we would be confounded by library size. The solution is to use relative counts instead:
+```{r}
+# Divide counts for gene1 per group over the total number of reads in each sample
+tmp$gene1prop <- c(tmp$gene1[1:3] / rowSums(tmp[tmp$cond == "ctrl", -3]),
+                   tmp$gene1[4:6] / rowSums(tmp[tmp$cond == "cases", -3]))
+plot(
+    tmp$cond,
+    tmp$gene1prop,
+    ylab = "Relative expression of genei",
+    xlab = "Condition")
+```
+
+Instead of dividing by the library size, *EdgeR computes the library normalization factors* such that the differences between cases and controls for each gene are minimized. Normalization factors below 1 indicate that some genes dominated the pool of reads for that given sample. Thus, this sample is down-scaled to let genes with fewer transcripts pop up. Conversely, if the normalization factor is above 1, the sample is going to be up-scaled.
+```{r}
+y <- calcNormFactors(y, method = "TMM")
+y$samples
+```
+
+### Accounting for biological variation
+The last step before we run our model of differential expression is to account for the differences among the biological replicates that carry noise instead of signal. That is, variation not due to the condition of interest.
+
+In all experiments there are at least two types of variability affecting the readouts: biological and technical. The former arises when comparing different biological units (e.g mice, humans, brain areas, etc.) and is caused by the biological and environmental factors that affect the phenotype of interest. For humans, this is the inter-human variation. The second type of variability is technical. RNAseq injects a bit of technical noise at virtually every step of the pipeline (PMID: 33987443). It is paramount to disentangle these two sources of variation.
+
+EdgeR computes the coefficient of variation to disentangle these two sources of variability as follows:
+
+The breakdown: that formula represents the technical variation and the biological variation. 
+$$\text{Total variation of counts} = \text{technical variation} + \text{biological variation}$$
+There is no reason to believe that the variability of reads across biological replicates is the same for all genes. Especially given how unevenly distributed the reads are (they follow a negative binomial after all). Thus, it is key to estimate the biological coefficient of variation (BCV) separately for genes with low, mid and high counts.
+
+The way EdgeR accounts for the differences in BCV for genes with different expression levels is by fitting a line to the trend of BCV:
+```{r}
+design <- model.matrix(~group, data=y$samples)
+y <- estimateDisp(y, design, prior.df=0)
+plotBCV(y, cex = 1)
+```
+
+The red line represents the average BCV. That is, the variation among biological replicates not accounting for gene-specific expression levels. The blue line accounts for the differences in variability for different gene expression levels. 
+
+EdgeR, then, shrinks each gene's BCV towards the blue line using empirical Bayes shrinkage:
+```{r}
+y <- estimateDisp(y,design)
+plotBCV(y, cex = 1)
+```
+
+Notice how lowly expressed genes have higher BCV than highly expressed genes. By using BCV, instead of the standard errors (as we did for our t-test), EdgeR is able to disentangle biological noise from true signal due to the condition of interest.
+
+### Modelling and hypothesis testing
+Now, we run the regression model and obtain the p-values from a likelihood ratio test
+```{r}
+fit <- glmFit(y, design = design)
+test <- glmLRT(fit, coef = 2)
+```
+
+The last step in this section is to format and view the results:
+```{r}
+res <- as.data.frame(topTags(test, n = Inf))
+res[1:5,]
+
+# Number of singnificantly differentially expressed genes
+nrow(res[res$FDR < 0.05,])
+```
+
+## Visualization
+
+Let's plot one of the differentially expressed genes:
+```{r}
+gene <- "FBgn0039155"
+cpms <- edgeR::cpm(y)
+genei <- data.frame(genei=cpms[gene, ], pheno)
+
+plot(
+    as.numeric(genei$group),
+    genei$genei,
+    type = "p",
+    pch = 16,
+    xlab = "Condition",
+    ylab = paste0(gene, " expression (cpm)")
+)
+```
+
+Now let's plot all genes in a volcano plot
+```{r}
+plot(res$logFC, -log10(res$PValue), col=ifelse(res$FDR < 0.05, "red", "black"))
+```
+
+Let's make it prettier:
+
+```{r}
+library(EnhancedVolcano)
+EnhancedVolcano(res,
+    lab = rownames(res),
+    x = 'logFC',
+    y = 'FDR',
+    FCcutoff=0,
+    title=NULL,
+    subtitle=NULL,
+    caption=NULL,
+    legendPosition = "none")
+```
+
+Output results
+```{r}
+write.csv(res,file="DEgene_results.csv")
+```
