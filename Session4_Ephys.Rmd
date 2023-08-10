@@ -1,0 +1,205 @@
+Load required library
+
+```{r}
+packages_to_install=c("plotly", "circular")
+install.packages(setdiff(packages_to_install, rownames(installed.packages())))
+```
+
+Load the libraries
+```{r}
+require(plotly)
+require(circular)
+```
+ ---------------------------------------- #
+Import data and convert spikes to data matrix
+ ---------------------------------------- #
+
+Load the data
+```{r}
+load(file= "ephysData.Rdata")
+```
+
+spike count for all trials
+note about sizes:
+data$EVENTS is [ neurons gratings trials ]
+
+extract sizes of the data matrix
+
+```{r}
+nNeurons <- dim(DATA$EVENTS)[1]
+nGratings <- dim(DATA$EVENTS)[2]
+nTrials <- dim(DATA$EVENTS)[3]
+```
+
+initialize
+```{r}
+totalSpikeCount <- array(0, dim = c(nNeurons, nGratings, nTrials))
+```
+
+loop through all elements of the data matrix
+```{r}
+for (neuroni in 1:nNeurons) {
+  for (grati in 1:nGratings) {
+    for (triali in 1:nTrials) {
+      # count the number of spikes in each cell
+      totalSpikeCount[neuroni, grati, triali] <- length(DATA$EVENTS[[neuroni, grati, triali]])
+    }
+  }
+}
+```
+
+and now using lapply instead of for loop
+```{r}
+totalSpikeCount2 <- array(unlist(lapply(DATA$EVENTS, length)),
+                          dim = c(nNeurons, nGratings, nTrials))
+```
+
+compare them to show they're equal
+```{r}
+dim(totalSpikeCount)
+dim(totalSpikeCount2)
+differenceMatrix <- totalSpikeCount - totalSpikeCount2
+sum(differenceMatrix)
+```
+
+------------------------------------------ #
+Histograms of spike counts       #
+------------------------------------------ #
+
+
+```{r}
+
+hist(totalSpikeCount, breaks = 40,
+     main = "Including zero-spike trials",
+     xlab = "Number of spikes",
+     ylab = "Count")
+```
+
+
+Exclude trials with no spikes
+```{r}
+hist(totalSpikeCount2[totalSpikeCount != 0], breaks = 40,
+     main = "Excluding zero-spike trials",
+     xlab = "Number of spikes",
+     ylab = "Count")
+```
+
+------------------------------------------ #
+Tuning curve                     #
+------------------------------------------ #
+
+
+pick a unit and compute its tuning curve
+pick a neuron at random
+```{r}
+randomunit <- sample(1:nNeurons, 1)
+
+# compute the average spike count over all trials per orientation
+averageSpikes <- apply(totalSpikeCount2[randomunit,,], c(1,2), mean)
+
+# find the maximum response
+maxresp <- which.max(averageSpikes)
+
+# visualize
+gradientOrient <- seq(0, 330, by = 30)
+
+# bar plot
+barplot(averageSpikes, names.arg = gradientOrient,
+        xlab = "Gradient orientation",
+        ylab = "Average spike count",
+        main = paste("Unit number", randomunit,
+                     "\"prefers\"", gradientOrient[maxresp], "degrees"),
+        col = "blue")
+
+```
+
+Generate a polar plot
+# https://plotly.com/r/polar-chart/
+
+```{r}
+theta <- circular(deg2rad(gradientOrient + 90))
+r <- circular(averageSpikes)
+plot(theta, r,
+     type = "p", pch = 16, col = "blue",
+     main = paste("Unit number", randomunit,
+                  "\"prefers\"", gradientOrient[maxresp], "degrees"),
+     ylab = "Average spike count")
+```
+------------------------------------------ #
+Visualize a spatial map          #
+------------------------------------------ #
+
+gather the data
+first map is total number of spikes
+then find all the unique units in the dataset
+
+```{r}
+spikesPerChan <- rowMeans(totalSpikeCount2, na.rm = TRUE)
+
+uniqueunits <- unique(data$CHANNELS[,1])
+```
+
+create the data matrix
+```{r}
+spikesMap <- matrix(0, nrow = nrow(data$MAP), ncol = ncol(data$MAP))
+
+for (uniti in 1:length(uniqueunits)) {
+  whichchans <- data$CHANNELS[,1] == uniqueunits[uniti]
+  indices <- which(data$MAP == uniqueunits[uniti], arr.ind = TRUE)
+  spikesMap[indices] <- mean(spikesPerChan[whichchans], na.rm = TRUE)
+}
+
+# visualize
+image(spikesMap, col = heat.colors(256),
+      xlab = "Column", ylab = "Row",
+      main = "Firing rate map", axes = FALSE)
+axis(1, at = seq(1, ncol(data$MAP), by = 10))
+axis(2, at = seq(1, nrow(data$MAP), by = 10))
+```
+------------------------------------------ #
+Visualize a spatial map          #
+------------------------------------------ #
+
+# compute the average spike count over all trials per orientation
+```{r}
+averageSpikes <- rowMeans(totalSpikeCount, dims = 2)
+
+# find the maximum response and convert to degrees
+maxresp <- apply(averageSpikes, 1, which.max)
+maxresp <- gradientOrient[maxresp]
+
+# create the data matrix
+orientationMap <- matrix(NA, nrow = nrow(data$MAP), ncol = ncol(data$MAP))
+
+for (uniti in 1:length(uniqueunits)) {
+  whichchans <- data$CHANNELS[,1] == uniqueunits[uniti]
+  indices <- which(data$MAP == uniqueunits[uniti], arr.ind = TRUE)
+  orientationMap[indices] <- mean(maxresp[whichchans])
+}
+
+# visualize using a circular colormap
+image(orientationMap, col = heat.colors(256),
+      xlab = "Column", ylab = "Row",
+      main = "Orientation map", axes = FALSE)
+axis(1, at = seq(1, ncol(data$MAP), by = 10))
+axis(2, at = seq(1, nrow(data$MAP), by = 10))
+```
+
+-------------------------------------------- #
+Optional additional exercises
+ -------------------------------------------- #
+
+1) Filter out trials with fewer than 5 spikes. Does this qualitatively
+   change the results? Try soft-coding to be able to specify any number
+   of spikes to filter out.
+ 
+2) Repeat the code for different datasets (monkeys 2-3). Put the results 
+  into different figures to compare the findings across datasets. What results
+  can be directly compared?
+
+3) Import the stimulus images and visualize the first frame of each
+   stimulus video.
+
+
+
+```
